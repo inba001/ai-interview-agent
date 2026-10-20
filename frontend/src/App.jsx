@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import axios from 'axios'
 import { v4 as uuidv4 } from 'uuid'
+import API_BASE from './api'
 import ControlPanel from './components/ControlPanel'
 import ChatWindow from './components/ChatWindow'
 import SessionSummary from './components/SessionSummary'
@@ -32,7 +33,7 @@ export default function App() {
     setIsLoading(true)
     setConfig(interviewConfig)
     try {
-      const response = await axios.post('/api/interview/start', {
+      const response = await axios.post(`${API_BASE}/api/interview/start`, {
         role: interviewConfig.role,
         topics: interviewConfig.topics,
         difficulty: interviewConfig.difficulty,
@@ -66,7 +67,7 @@ export default function App() {
     setIsLoading(true)
 
     try {
-      const response = await axios.post('/api/interview/chat', {
+      const response = await axios.post(`${API_BASE}/api/interview/chat`, {
         session_id: sessionId,
         history: updatedHistory.map(({ role, content }) => ({ role, content })),
         user_message: userMessage.trim(),
@@ -99,7 +100,7 @@ export default function App() {
     setIsLoading(true)
     setPhase(PHASES.FEEDBACK)
     try {
-      const response = await axios.post('/api/feedback/analyze', {
+      const response = await axios.post(`${API_BASE}/api/feedback/analyze`, {
         history: history.map(({ role, content }) => ({ role, content })),
         role: config.role,
         topics: config.topics,
