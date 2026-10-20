@@ -1,11 +1,15 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 import uuid
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 router = APIRouter()
+
+def get_client():
+    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 class StartRequest(BaseModel):
@@ -56,33 +60,37 @@ def build_system_prompt(role: str, topics: List[str], difficulty: str) -> str:
     )
 
 
-def build_gemini_history(system_prompt: str, history: List[HistoryItem]) -> List[dict]:
-    """
-    Build conversation history in Gemini's format.
-    We inject the system prompt as the first user message and add a model acknowledgement,
-    then append the real conversation history.
-    """
-    gemini_history = [
-        {
-            "role": "user",
-            "parts": [{"text": f"[SYSTEM INSTRUCTIONS]\n{system_prompt}"}],
-        },
-        {
-            "role": "model",
-            "parts": [{"text": "Understood. I will follow these instructions carefully and conduct the interview as specified."}],
-        },
+def build_contents(system_prompt: str, history: List[HistoryItem], new_user_message: str = None) -> List[types.Content]:
+    """Build conversation history in the new google-genai Content format."""
+    contents = [
+        types.Content(
+            role="user",
+            parts=[types.Part(text=f"[SYSTEM INSTRUCTIONS]\n{system_prompt}")]
+        ),
+        types.Content(
+            role="model",
+            parts=[types.Part(text="Understood. I will follow these instructions carefully and conduct the interview as specified.")]
+        ),
     ]
 
     for item in history:
         gemini_role = "user" if item.role == "user" else "model"
-        gemini_history.append(
-            {
-                "role": gemini_role,
-                "parts": [{"text": item.content}],
-            }
+        contents.append(
+            types.Content(
+                role=gemini_role,
+                parts=[types.Part(text=item.content)]
+            )
         )
 
-    return gemini_history
+    if new_user_message:
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[types.Part(text=new_user_message)]
+            )
+        )
+
+    return contents
 
 
 @router.post("/start", response_model=StartResponse)
@@ -91,30 +99,24 @@ async def start_interview(request: StartRequest):
     try:
         session_id = str(uuid.uuid4())
         system_prompt = build_system_prompt(request.role, request.topics, request.difficulty)
-
         topics_str = ", ".join(request.topics)
+
         opening_prompt = (
             f"Please greet me, briefly introduce yourself as the interviewer for a {request.role} position, "
             f"mention the topics we'll cover ({topics_str}), and then ask your first interview question."
         )
 
-        gemini_history = [
-            {
-                "role": "user",
-                "parts": [{"text": f"[SYSTEM INSTRUCTIONS]\n{system_prompt}"}],
-            },
-            {
-                "role": "model",
-                "parts": [{"text": "Understood. I will follow these instructions carefully and conduct the interview as specified."}],
-            },
-            {
-                "role": "user",
-                "parts": [{"text": opening_prompt}],
-            },
+        contents = [
+            types.Content(role="user", parts=[types.Part(text=f"[SYSTEM INSTRUCTIONS]\n{system_prompt}")]),
+            types.Content(role="model", parts=[types.Part(text="Understood. I will follow these instructions carefully.")]),
+            types.Content(role="user", parts=[types.Part(text=opening_prompt)]),
         ]
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(gemini_history)
+        client = get_client()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=contents,
+        )
         opening_message = response.text
 
         return StartResponse(session_id=session_id, message=opening_message)
@@ -133,19 +135,13 @@ async def chat(request: ChatRequest):
             request.interview_config.difficulty,
         )
 
-        # Build history WITHOUT the new user message first (it's passed separately)
-        gemini_history = build_gemini_history(system_prompt, request.history)
+        contents = build_contents(system_prompt, request.history, request.user_message)
 
-        # Append the new user message
-        gemini_history.append(
-            {
-                "role": "user",
-                "parts": [{"text": request.user_message}],
-            }
+        client = get_client()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=contents,
         )
-
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(gemini_history)
         ai_message = response.text
 
         # Check if interview is complete

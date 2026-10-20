@@ -1,10 +1,15 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict
 import json
-import google.generativeai as genai
+import os
+from google import genai
+from google.genai import types
 
 router = APIRouter()
+
+def get_client():
+    return genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
 class HistoryItem(BaseModel):
@@ -47,6 +52,26 @@ def format_transcript(history: List[HistoryItem]) -> str:
     return "\n\n".join(lines)
 
 
+def parse_json_response(raw_text: str) -> dict:
+    """Parse JSON from Gemini response, stripping markdown if needed."""
+    raw_text = raw_text.strip()
+    if raw_text.startswith("```"):
+        parts = raw_text.split("```")
+        raw_text = parts[1]
+        if raw_text.startswith("json"):
+            raw_text = raw_text[4:]
+        raw_text = raw_text.strip()
+
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        start = raw_text.find("{")
+        end = raw_text.rfind("}") + 1
+        if start != -1 and end > start:
+            return json.loads(raw_text[start:end])
+        raise
+
+
 @router.post("/analyze", response_model=FeedbackResponse)
 async def analyze_interview(request: AnalyzeRequest):
     """Analyze the completed interview and return detailed feedback."""
@@ -76,32 +101,20 @@ Based on this transcript, provide a comprehensive evaluation. You MUST return ON
 
 Ensure topic_scores covers: {topics_str}. Return ONLY the JSON object."""
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(prompt)
-        raw_text = response.text.strip()
-
-        # Strip markdown code blocks if Gemini wraps the JSON
-        if raw_text.startswith("```"):
-            raw_text = raw_text.split("```")[1]
-            if raw_text.startswith("json"):
-                raw_text = raw_text[4:]
-            raw_text = raw_text.strip()
+        client = get_client()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
 
         try:
-            feedback_data = json.loads(raw_text)
-        except json.JSONDecodeError as parse_err:
-            # Try to extract JSON object from the response
-            start = raw_text.find("{")
-            end = raw_text.rfind("}") + 1
-            if start != -1 and end > start:
-                feedback_data = json.loads(raw_text[start:end])
-            else:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to parse Gemini feedback JSON: {str(parse_err)}. Raw response: {raw_text[:500]}"
-                )
+            feedback_data = parse_json_response(response.text)
+        except (json.JSONDecodeError, Exception) as parse_err:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to parse feedback JSON: {str(parse_err)}. Raw: {response.text[:300]}"
+            )
 
-        # Validate and normalize fields
         overall_score = max(1, min(10, int(feedback_data.get("overall_score", 5))))
         strengths = feedback_data.get("strengths", [])[:5]
         improvements = feedback_data.get("improvements", [])[:5]
@@ -137,26 +150,16 @@ Return ONLY a valid JSON object with NO markdown, NO code blocks, NO extra text:
   "sample_answer": "<a comprehensive model answer>"
 }}"""
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(prompt)
-        raw_text = response.text.strip()
-
-        # Strip markdown code blocks if present
-        if raw_text.startswith("```"):
-            raw_text = raw_text.split("```")[1]
-            if raw_text.startswith("json"):
-                raw_text = raw_text[4:]
-            raw_text = raw_text.strip()
+        client = get_client()
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
 
         try:
-            data = json.loads(raw_text)
-        except json.JSONDecodeError:
-            start = raw_text.find("{")
-            end = raw_text.rfind("}") + 1
-            if start != -1 and end > start:
-                data = json.loads(raw_text[start:end])
-            else:
-                raise HTTPException(status_code=500, detail="Failed to parse practice question response.")
+            data = parse_json_response(response.text)
+        except Exception:
+            raise HTTPException(status_code=500, detail="Failed to parse practice question response.")
 
         return PracticeQuestionResponse(
             question=data.get("question", ""),

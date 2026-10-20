@@ -2,10 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
-import google.generativeai as genai
 
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+# API key is read from env by the google-genai SDK automatically,
+# or set explicitly in each router via google.genai.Client(api_key=...)
+
 
 app = FastAPI(title="AI Interview Prep Agent", version="1.0.0")
 
