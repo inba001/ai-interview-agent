@@ -103,7 +103,7 @@ Ensure topic_scores covers: {topics_str}. Return ONLY the JSON object."""
 
         client = get_client()
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.8-flash",
             contents=prompt,
         )
 
@@ -152,7 +152,7 @@ Return ONLY a valid JSON object with NO markdown, NO code blocks, NO extra text:
 
         client = get_client()
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.8-flash",
             contents=prompt,
         )
 
