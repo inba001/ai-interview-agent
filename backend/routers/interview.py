@@ -114,7 +114,7 @@ async def start_interview(request: StartRequest):
 
         client = get_client()
         response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-flash-latest",
             contents=contents,
         )
         opening_message = response.text
@@ -139,7 +139,7 @@ async def chat(request: ChatRequest):
 
         client = get_client()
         response = client.models.generate_content(
-            model="gemini-3.8-flash",
+            model="gemini-flash-latest",
             contents=contents,
         )
         ai_message = response.text
